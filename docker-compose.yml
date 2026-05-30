@@ -1,58 +1,105 @@
-version: '3.8'
+# ==============================================================================
+# ФАЙЛ ОРКЕСТРАЦИИ: docker-compose.yml
+# Описание: Автоматическое развертывание репликации MySQL (Master-Slave и Master-Master)
+# ==============================================================================
+
+version: '3.8' # Определяет версию стандарта Docker Compose и доступный набор инструкций.
 
 networks:
   replication_net:
-    driver: bridge # Создаем общую изолированную сеть для общения серверов по именам
+    driver: bridge # Создает изолированную внутреннюю сеть (виртуальный коммутатор).
+                   # Контейнеры внутри нее общаются напрямую по именам своих сервисов
+                   # (например, 'mysql-master'), игнорируя внешние IP-адреса хоста.
 
 services:
-  # --- Инфраструктура для Задания 2 (Master-Slave) ---
+  # ============================================================================
+  # ЗАДАНИЕ 2: ИНФРАСТРУКТУРА MASTER-SLAVE (ГЛАВНЫЙ - ПОДЧИНЕННЫЙ)
+  # ============================================================================
+  
+  # mysql-master — уникальное имя службы главного сервера в нашей внутренней сети
   mysql-master:
-    image: mysql:8.0
-    container_name: mysql-master
+    image: mysql:8.0 # Скачивает официальный стабильный образ СУБД MySQL версии 8.0 с Docker Hub.
+    container_name: mysql-master # Фиксирует имя контейнера для удобного управления через терминал (docker logs/ps).
+    
+    # command принудительно переопределяет стартовую команду СУБД:
+    # 1. --default-authentication-plugin=mysql_native_password — включает совместимый метод проверки паролей.
+    # 2. --bind-address=0.0.0.0 — заставляет MySQL слушать сетевые пакеты со всех интерфейсов хоста.
+    command: --default-authentication-plugin=mysql_native_password --bind-address=0.0.0.0
+    
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD} # Забираем пароль из файла .env
+      # MYSQL_ROOT_PASSWORD — задает главный пароль root-пользователя. Конструкция ${...} 
+      # автоматически и безопасно считывает значение из скрытого файла переменных окружения '.env'.
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      
+      # MYSQL_ROOT_HOST: '%' — критически важная переменная. Стирает стандартное ограничение 'localhost'
+      # и разрешает root подключаться в DBeaver с любых внешних IP-адресов (включая шлюз Docker-сети 192.168.32.1).
+      MYSQL_ROOT_HOST: '%'
+      
     ports:
-      - "3306:3306" # Проброс стандартного порта наружу
+      - "3306:3306" # Проброс портов: [Внешний порт вашего компьютера] : [Внутренний порт контейнера].
+                    # Главный сервер будет доступен в DBeaver на стандартном порту 3306.
+                    
     volumes:
-      - ./master.cnf:/etc/mysql/conf.d/master.cnf # Монтируем настройки
+      # Volumes монтируют (прокидывают) файлы и папки с вашего компьютера внутрь контейнера:
+      - ./master.cnf:/etc/mysql/conf.d/master.cnf # Подкладывает наши настройки репликации в конфигурацию MySQL.
+      
+      # Директория /docker-entrypoint-initdb.d/ — встроенный инструмент автоматизации Docker.
+      # Все находящиеся здесь .sql скрипты автоматически выполняются базой данных строго ОДИН раз при первом старте.
+      - ./init/master-init.sql:/docker-entrypoint-initdb.d/master-init.sql
+      
     networks:
-      - replication_net
+      - replication_net # Помещает контейнер Мастера в нашу общую изолированную сеть.
 
+  # mysql-slave — подчиненный сервер (реплика Мастера)
   mysql-slave:
     image: mysql:8.0
     container_name: mysql-slave
+    command: --default-authentication-plugin=mysql_native_password --bind-address=0.0.0.0
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_HOST: '%' # Открывает беспрепятственный доступ для root-пользователя в DBeaver на порт 3307
     ports:
-      - "3307:3306" # Пробрасываем слейв наружу на порт 3307 компьютера
+      - "3307:3306" # Пробрасывает Слейв наружу на соседний порт 3307, чтобы избежать конфликта за порт 3306 с Мастером.
     volumes:
-      - ./slave.cnf:/etc/mysql/conf.d/slave.cnf
+      - ./slave.cnf:/etc/mysql/conf.d/slave.cnf # Подкладывает настройки репликации (включая флаг read_only = 1).
+      - ./init/slave-init.sql:/docker-entrypoint-initdb.d/slave-init.sql # Скрипт автоматической связки логов при старте.
     depends_on:
-      - mysql-master # Слейв ждет старта мастера
+      - mysql-master # Порядок запуска: Слейв начнет включаться строго ПОСЛЕ успешного поднятия контейнера Мастера.
     networks:
       - replication_net
 
-  # --- Дополнительная инфраструктура для Задания 3* (Master-Master) ---
+  # ============================================================================
+  # ЗАДАНИЕ 3*: ИНФРАСТРУКТУРА MASTER-MASTER (ГЛАВНЫЙ - ГЛАВНЫЙ)
+  # ============================================================================
+  
+  # mm-master1 — первый равноправный главный сервер из пары двусторонней репликации
   mm-master1:
     image: mysql:8.0
     container_name: mm-master1
+    command: --default-authentication-plugin=mysql_native_password --bind-address=0.0.0.0
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_HOST: '%' # Разрешает внешнее root-подключение для DBeaver на порт 3308
     ports:
-      - "3308:3306" # Доступен на порту 3308 хоста
+      - "3308:3306" # Доступен на вашем компьютере через порт 3308.
     volumes:
-      - ./master1.cnf:/etc/mysql/conf.d/master1.cnf
+      - ./master1.cnf:/etc/mysql/conf.d/master1.cnf # Настройки ID сервера и нечетного шага автоинкремента.
+      - ./init/mm1-init.sql:/docker-entrypoint-initdb.d/mm1-init.sql # Скрипт автоматического закольцовывания на mm-master2.
     networks:
       - replication_net
 
+  # mm-master2 — второй равноправный главный сервер из пары двусторонней репликации
   mm-master2:
     image: mysql:8.0
     container_name: mm-master2
+    command: --default-authentication-plugin=mysql_native_password --bind-address=0.0.0.0
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_HOST: '%' # Разрешает внешнее root-подключение для DBeaver на порт 3309
     ports:
-      - "3309:3306" # Доступен на порту 3309 хоста
+      - "3309:3306" # Доступен на вашем компьютере через порт 3309.
     volumes:
-      - ./master2.cnf:/etc/mysql/conf.d/master2.cnf
+      - ./master2.cnf:/etc/mysql/conf.d/master2.cnf # Настройки ID сервера и четного шага автоинкремента.
+      - ./init/mm2-init.sql:/docker-entrypoint-initdb.d/mm2-init.sql # Скрипт автоматического закольцовывания на mm-master1.
     networks:
       - replication_net
