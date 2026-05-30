@@ -174,6 +174,7 @@ START SLAVE;
 * **`services`** — главный раздел, где перечисляются все запускаемые контейнеры (серверы базы данных).
 
 ```yaml
+
 # ==============================================================================
 # ФАЙЛ ОРКЕСТРАЦИИ: docker-compose.yml
 # Описание: Автоматическое развертывание репликации MySQL (Master-Slave и Master-Master)
@@ -279,4 +280,5 @@ services:
       - ./init/mm2-init.sql:/docker-entrypoint-initdb.d/mm2-init.sql # Скрипт автоматического закольцовывания на mm-master1.
     networks:
       - replication_net
+
 ```
