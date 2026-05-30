@@ -1,0 +1,58 @@
+version: '3.8'
+
+networks:
+  replication_net:
+    driver: bridge # Создаем общую изолированную сеть для общения серверов по именам
+
+services:
+  # --- Инфраструктура для Задания 2 (Master-Slave) ---
+  mysql-master:
+    image: mysql:8.0
+    container_name: mysql-master
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD} # Забираем пароль из файла .env
+    ports:
+      - "3306:3306" # Проброс стандартного порта наружу
+    volumes:
+      - ./master.cnf:/etc/mysql/conf.d/master.cnf # Монтируем настройки
+    networks:
+      - replication_net
+
+  mysql-slave:
+    image: mysql:8.0
+    container_name: mysql-slave
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "3307:3306" # Пробрасываем слейв наружу на порт 3307 компьютера
+    volumes:
+      - ./slave.cnf:/etc/mysql/conf.d/slave.cnf
+    depends_on:
+      - mysql-master # Слейв ждет старта мастера
+    networks:
+      - replication_net
+
+  # --- Дополнительная инфраструктура для Задания 3* (Master-Master) ---
+  mm-master1:
+    image: mysql:8.0
+    container_name: mm-master1
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "3308:3306" # Доступен на порту 3308 хоста
+    volumes:
+      - ./master1.cnf:/etc/mysql/conf.d/master1.cnf
+    networks:
+      - replication_net
+
+  mm-master2:
+    image: mysql:8.0
+    container_name: mm-master2
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "3309:3306" # Доступен на порту 3309 хоста
+    volumes:
+      - ./master2.cnf:/etc/mysql/conf.d/master2.cnf
+    networks:
+      - replication_net

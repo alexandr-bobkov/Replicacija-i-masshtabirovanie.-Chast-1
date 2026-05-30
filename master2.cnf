@@ -1,0 +1,7 @@
+[mysqld]
+server-id = 20
+log-bin = mysql-bin-m2
+# Шаг инкремента равен двум, как и на первом сервере
+auto_increment_increment = 2
+# Начальное смещение равно двум. Этот сервер будет создавать строки с ID: 2, 4, 6, 8, 10...
+auto_increment_offset = 2
